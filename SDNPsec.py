@@ -22,6 +22,7 @@ import pox.openflow.libopenflow_01 as of
 from pox.lib.util import dpid_to_str
 from pox.lib.util import str_to_bool
 import time
+import jwt
 
 log = core.getLogger()
 
@@ -48,7 +49,7 @@ class LearningSwitch (object):
      Yes:
         3a) Flood the packet (should change the flood and send it to knonwn hosts in CAM )
             DONE
-  4) Port for destination address in our address/port table?
+  4) Port for destination address in our address/port table and jwt verified?
      No:
         4a) Drop the packet
             DONE
@@ -129,14 +130,28 @@ class LearningSwitch (object):
         self.connection.send(msg)
 
     if packet.type==34959: #1
+      # log.warn(packet.payload)
+      
       if packet.src not in self.macToPort:
         self.macToPort[packet.src]={}
         self.macToPort[packet.src][event.port]=packet.payload
+        # sign a jwt access token and send it back to the host.
+        log.debug(str(packet.src))
+        access_token = jwt.encode({"mac": str(packet.src).replace(':','')}, "Asghar_is_comming", algorithm="HS256")
+        log.debug(access_token)
+        # future work : send it back to the host in same frame format.:) 
       else:
         port,token = self.macToPort[packet.src].items()[0]
-        if token == packet.payload:
+        # decode and verify jwt token is valid and check expiration.
+        try:
+          decoded_token = jwt.decode(packet.payload, "Asghar_is_comming", algorithms="HS256")
+          mac = decoded_token['mac']
+          print(mac)
+        except jwt.DecodeError:
+          return log.error("invalid access token")
+        if mac == str(packet.src).replace(':',''):
           if port!=event.port:
-            print "host %s will change location from port %s to %s\n"%(packet.src,port,event.port)
+            log.debug("host ",packet.src," will change location from port ",port," to", event.port)
             # secure host location change.
             del self.macToPort[packet.src][port]
             self.macToPort[packet.src][event.port]=token
